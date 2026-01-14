@@ -1,0 +1,75 @@
+<--Inactivity Period -->
+DROP TABLE IF EXISTS #TABL
+
+CREATE TABLE #TABL (
+	CLIENT_CODE nvarchar(15)
+		, CURRENCY_CODE varchar(15)
+		, BALANCE_ACCOUNT_1 nvarchar(15)
+		, CODE nvarchar(15)
+		, CREDIT_BAL_AMD money
+		, FACT_DATE date
+		)
+
+DECLARE @START_DATE date = '01-01-23', @END_DATE date = '12-31-23'
+
+WHILE @START_DATE <= @END_DATE
+	BEGIN
+INSERT INTO #TABL
+select CLIENT_CODE
+		, CURRENCY_CODE
+		, BALANCE_ACCOUNT_1
+		, ac.CODE
+		, CREDIT_BAL_AMD
+		, FACT_DATE
+from ACCOUNTS_BALANCE_ByDATE(@START_DATE) ac
+join GENERAL.dbo.CLIENTS c on ac.CLIENT_CODE = c.CODE
+where BALANCE_ACCOUNT_1 in ('3022000', '3302000')
+		and LEGAL_STATE = '21'
+		and CREDIT_BAL_AMD >= 50000
+		and CURRENCY_CODE = 'AMD'
+order by CODE
+SET @START_DATE = DATEADD(day,1, @START_DATE)
+END;
+
+with cte as (
+select ACCOUNT_TYPE
+		, ACCOUNT_CODE
+		, CREDIT_BAL_AMD
+		, NEXT_DAY
+		, DIFF
+		, DAYS_COUNT
+		, SUM(DAYS_COUNT) over(partition by ACCOUNT_CODE, CREDIT_BAL_AMD order by FACT_DATE)  TOTAL_DAYS
+		, FACT_DATE
+from (
+select CLIENT_CODE
+			, BALANCE_ACCOUNT_1 ACCOUNT_TYPE
+			, CODE ACCOUNT_CODE
+			, CREDIT_BAL_AMD
+			, lead(CREDIT_BAL_AMD) over(partition by CODE order by FACT_DATE) NEXT_DAY
+			, lead(CREDIT_BAL_AMD) over(partition by CODE order by FACT_DATE) - CREDIT_BAL_AMD DIFF
+			, case when lead(CREDIT_BAL_AMD) over(partition by CODE order by FACT_DATE) - CREDIT_BAL_AMD = 0 then 1 else 0 end as DAYS_COUNT
+			, FACT_DATE
+
+from #TABL
+where CODE = '10138440100'
+) t
+where DIFF = 0
+)
+
+
+select *
+from (
+select ACCOUNT_TYPE
+		, ACCOUNT_CODE
+		, CREDIT_BAL_AMD
+		, NEXT_DAY
+		, DIFF
+		, DAYS_COUNT
+		, TOTAL_DAYS
+		, FACT_DATE
+		, row_number() over (partition by ACCOUNT_CODE, CREDIT_BAL_AMD order by FACT_DATE DESC) MAX_ROW_NUM
+from cte
+) t1
+where MAX_ROW_NUM = 1
+order by TOTAL_DAYS DESC
+--RUNNING TOTAL BASED ON CODE, CREDIT_BAL_AMD & FACT_DATE
